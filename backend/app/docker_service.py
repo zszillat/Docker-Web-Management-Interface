@@ -1,4 +1,8 @@
+import json
 import logging
+import os
+import subprocess
+from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
 import docker
@@ -10,7 +14,7 @@ logger = logging.getLogger(__name__)
 class DockerService:
     """Wrapper around the Docker SDK with utilities used by the API layer."""
 
-    def __init__(self) -> None:
+    def __init__(self, stack_root: str | Path | None = None) -> None:
         try:
             self.client = docker.from_env()
             self.low_level = docker.APIClient.from_env()
@@ -19,6 +23,9 @@ class DockerService:
         except Exception as exc:  # pragma: no cover - connectivity depends on host
             logger.exception("Unable to connect to the Docker Engine")
             raise RuntimeError("Docker Engine is not reachable via /var/run/docker.sock") from exc
+
+        root = stack_root or os.environ.get("STACK_ROOT", "/mnt/storage/yaml")
+        self.stack_root = Path(root).expanduser()
 
     # Containers
     def list_containers(self) -> List[Dict]:
@@ -75,6 +82,69 @@ class DockerService:
     def delete_image(self, image_id: str, force: bool = False, noprune: bool = False) -> None:
         self.low_level.remove_image(image_id, force=force, noprune=noprune)
 
+    # Compose stacks
+    def discover_stacks(self) -> List[Dict]:
+        """Scan the configured stack root for compose projects."""
+        if not self.stack_root.exists():
+            logger.warning("Stack root %s does not exist", self.stack_root)
+            return []
+
+        stacks: List[Dict] = []
+        for child in self.stack_root.iterdir():
+            if not child.is_dir():
+                continue
+            compose_file = self._compose_file_for_directory(child)
+            if compose_file:
+                stacks.append(
+                    {
+                        "name": child.name,
+                        "path": str(child),
+                        "compose_file": str(compose_file),
+                    }
+                )
+        return sorted(stacks, key=lambda stack: stack["name"])
+
+    def compose_ls(self) -> List[Dict]:
+        """Run `docker compose ls` to list projects known to the engine."""
+        output = self._run_command(["docker", "compose", "ls", "--format", "json"])
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            raise RuntimeError("Unable to parse compose ls output") from exc
+
+    def compose_ps(self, stack_name: str) -> List[Dict]:
+        compose_file = self._compose_file_for_stack(stack_name)
+        output = self._run_command(
+            ["docker", "compose", "-f", str(compose_file), "ps", "--format", "json"]
+        )
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as exc:  # pragma: no cover - defensive
+            raise RuntimeError("Unable to parse compose ps output") from exc
+
+    def compose_up(self, stack_name: str) -> List[str]:
+        """Run `docker compose up -d` and return combined stdout/stderr lines."""
+        compose_file = self._compose_file_for_stack(stack_name)
+        return self._run_command(
+            ["docker", "compose", "-f", str(compose_file), "up", "-d"],
+            split_lines=True,
+        )
+
+    def compose_down(self, stack_name: str) -> List[str]:
+        compose_file = self._compose_file_for_stack(stack_name)
+        return self._run_command(
+            ["docker", "compose", "-f", str(compose_file), "down"],
+            split_lines=True,
+        )
+
+    def compose_up_stream(self, stack_name: str) -> Iterable[str]:
+        compose_file = self._compose_file_for_stack(stack_name)
+        return self._stream_command(["docker", "compose", "-f", str(compose_file), "up", "-d"])
+
+    def compose_down_stream(self, stack_name: str) -> Iterable[str]:
+        compose_file = self._compose_file_for_stack(stack_name)
+        return self._stream_command(["docker", "compose", "-f", str(compose_file), "down"])
+
     # Helpers
     @staticmethod
     def _format_volume(volume: docker.models.volumes.Volume) -> Dict:
@@ -105,6 +175,45 @@ class DockerService:
             "labels": image.attrs.get("Config", {}).get("Labels") or {},
             "size": image.attrs.get("Size"),
         }
+
+    def _compose_file_for_stack(self, stack_name: str) -> Path:
+        compose_file = self._compose_file_for_directory(self.stack_root / stack_name)
+        if not compose_file:
+            raise errors.NotFound(f"Stack '{stack_name}' not found in {self.stack_root}")
+        return compose_file
+
+    @staticmethod
+    def _compose_file_for_directory(directory: Path) -> Path | None:
+        for candidate in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
+            compose_file = directory / candidate
+            if compose_file.exists():
+                return compose_file
+        return None
+
+    def _run_command(self, cmd: List[str], split_lines: bool = False) -> List[str] | str:
+        logger.info("Running command: %s", " ".join(cmd))
+        try:
+            output = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
+            return output.splitlines() if split_lines else output
+        except subprocess.CalledProcessError as exc:  # pragma: no cover - depends on host Docker
+            logger.error("Command failed: %s", exc.output)
+            raise RuntimeError(exc.output.strip()) from exc
+
+    def _stream_command(self, cmd: List[str]) -> Iterable[str]:
+        logger.info("Streaming command: %s", " ".join(cmd))
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+
+        if not process.stdout:  # pragma: no cover - defensive
+            return []
+
+        def _iterator() -> Iterable[str]:
+            for line in process.stdout:
+                yield line.rstrip("\n")
+            return_code = process.wait()
+            if return_code != 0:
+                raise RuntimeError(f"Command {' '.join(cmd)} failed with exit code {return_code}")
+
+        return _iterator()
 
 
 def get_docker_service() -> DockerService:
