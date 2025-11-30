@@ -49,3 +49,24 @@ export interface StackFiles {
   compose_content: string;
   env_content?: string;
 }
+
+export interface SystemDfSummary {
+  total_size: number;
+  images: { count: number; size: number };
+  containers: { count: number; size: number };
+  volumes: { count: number; size: number };
+  build_cache: { count: number; size: number };
+}
+
+export interface CleanupSelection {
+  containers: boolean;
+  volumes: boolean;
+  networks: boolean;
+  images: boolean;
+}
+
+export interface CleanupResponse {
+  before: SystemDfSummary;
+  after: SystemDfSummary;
+  reclaimed_bytes: number;
+}

@@ -17,7 +17,7 @@ class DockerService:
     def __init__(self, stack_root: str | Path | None = None) -> None:
         try:
             self.client = docker.from_env()
-            self.low_level = docker.APIClient.from_env()
+        self.low_level = docker.APIClient.from_env()
             # Validate connection early so we fail fast if the socket is missing.
             self.client.ping()
         except Exception as exc:  # pragma: no cover - connectivity depends on host
@@ -26,6 +26,36 @@ class DockerService:
 
         root = stack_root or os.environ.get("STACK_ROOT", "/mnt/storage/yaml")
         self.stack_root = Path(root).expanduser()
+
+    # System info
+    def system_df(self) -> Dict:
+        return self.low_level.df()
+
+    def system_df_summary(self) -> Dict:
+        data = self.system_df()
+
+        def _sum(items, key, nested: str | None = None):
+            total = 0
+            for item in items or []:
+                target = item.get(nested, {}) if nested else item
+                total += target.get(key) or 0
+            return total
+
+        images = data.get("Images") or []
+        containers = data.get("Containers") or []
+        volumes = data.get("Volumes") or []
+        build_cache = data.get("BuildCache") or []
+
+        return {
+            "total_size": (data.get("LayersSize") or 0)
+            + _sum(containers, "SizeRootFs")
+            + _sum(volumes, "Size", nested="UsageData")
+            + _sum(build_cache, "Size"),
+            "images": {"count": len(images), "size": _sum(images, "Size")},
+            "containers": {"count": len(containers), "size": _sum(containers, "SizeRootFs")},
+            "volumes": {"count": len(volumes), "size": _sum(volumes, "Size", nested="UsageData")},
+            "build_cache": {"count": len(build_cache), "size": _sum(build_cache, "Size")},
+        }
 
     # Containers
     def list_containers(self) -> List[Dict]:
@@ -93,6 +123,26 @@ class DockerService:
 
     def delete_image(self, image_id: str, force: bool = False, noprune: bool = False) -> None:
         self.low_level.remove_image(image_id, force=force, noprune=noprune)
+
+    def prune_resources(
+        self,
+        *,
+        containers: bool = False,
+        volumes: bool = False,
+        networks: bool = False,
+        images: bool = False,
+    ) -> Dict:
+        results: Dict[str, Dict] = {}
+        if containers:
+            results["containers"] = self.client.containers.prune()
+        if volumes:
+            results["volumes"] = self.client.volumes.prune()
+        if networks:
+            results["networks"] = self.client.networks.prune()
+        if images:
+            # Include all unused images, not just dangling layers
+            results["images"] = self.client.images.prune(filters={"dangling": False})
+        return results
 
     # Compose stacks
     def discover_stacks(self) -> List[Dict]:
