@@ -1,5 +1,6 @@
 import logging
 from contextlib import suppress
+from pathlib import Path
 from typing import Annotated
 
 import anyio
@@ -10,6 +11,7 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.websockets import WebSocketState
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .auth import AuthManager
@@ -553,3 +555,8 @@ async def _forward_shell_input(websocket: WebSocket, shell_socket, cancel_scope:
         cancel_scope.cancel()
         with suppress(Exception):
             shell_socket.close()
+
+
+frontend_dir = Path(__file__).resolve().parent / "static"
+if frontend_dir.exists():
+    app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
