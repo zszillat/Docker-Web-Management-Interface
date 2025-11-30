@@ -14,6 +14,9 @@ function Layout({ children }: Props) {
       <aside className="sidebar">
         <h1>Docker Web Manager</h1>
         <div className="nav-section">
+          <NavLink to="/compose" className={navLinkClasses}>
+            Compose
+          </NavLink>
           <NavLink to="/containers" className={navLinkClasses}>
             Containers
           </NavLink>
@@ -27,7 +30,7 @@ function Layout({ children }: Props) {
             Images
           </NavLink>
         </div>
-        <span className="inline-hint">Stage 3 — Base UI</span>
+        <span className="inline-hint">Stage 4 — Compose UI</span>
       </aside>
       <main className="content-area">{children}</main>
     </div>

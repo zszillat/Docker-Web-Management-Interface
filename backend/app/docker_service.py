@@ -145,6 +145,52 @@ class DockerService:
         compose_file = self._compose_file_for_stack(stack_name)
         return self._stream_command(["docker", "compose", "-f", str(compose_file), "down"])
 
+    # Stack file management
+    def create_stack(self, name: str, compose_content: str, env_content: str | None = None, overwrite: bool = False) -> Dict:
+        safe_name = self._validate_stack_name(name)
+        stack_dir = self.stack_root / safe_name
+
+        if stack_dir.exists() and not overwrite:
+            raise ValueError(f"Stack '{safe_name}' already exists at {stack_dir}")
+
+        stack_dir.mkdir(parents=True, exist_ok=True)
+        compose_path = stack_dir / "docker-compose.yaml"
+        compose_path.write_text(compose_content)
+
+        if env_content is not None:
+            env_path = stack_dir / ".env"
+            env_path.write_text(env_content)
+
+        return {
+            "name": safe_name,
+            "path": str(stack_dir),
+            "compose_file": str(compose_path),
+        }
+
+    def read_stack_files(self, stack_name: str) -> Dict:
+        compose_file = self._compose_file_for_stack(stack_name)
+        env_file = compose_file.parent / ".env"
+        return {
+            "compose_content": compose_file.read_text(),
+            "env_content": env_file.read_text() if env_file.exists() else "",
+        }
+
+    def update_stack_files(self, stack_name: str, compose_content: str, env_content: str | None = None) -> Dict:
+        compose_file = self._compose_file_for_stack(stack_name)
+        compose_file.write_text(compose_content)
+
+        env_file = compose_file.parent / ".env"
+        if env_content is not None:
+            env_file.write_text(env_content)
+        elif env_file.exists():
+            env_file.unlink()
+
+        return {
+            "name": stack_name,
+            "compose_file": str(compose_file),
+            "env_file": str(env_file),
+        }
+
     # Helpers
     @staticmethod
     def _format_volume(volume: docker.models.volumes.Volume) -> Dict:
@@ -214,6 +260,13 @@ class DockerService:
                 raise RuntimeError(f"Command {' '.join(cmd)} failed with exit code {return_code}")
 
         return _iterator()
+
+    @staticmethod
+    def _validate_stack_name(name: str) -> str:
+        candidate = Path(name).name
+        if candidate != name or not candidate:
+            raise ValueError("Invalid stack name")
+        return candidate
 
 
 def get_docker_service() -> DockerService:
