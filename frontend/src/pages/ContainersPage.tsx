@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react';
 import ResourceTable, { Column } from '../components/ResourceTable';
 import LogViewer from '../components/LogViewer';
+import ShellTerminal from '../components/ShellTerminal';
 import { ContainerSummary } from '../types';
-import { containerLogStream, fetchContainers, startContainer, stopContainer } from '../api';
+import { containerLogStream, containerShellStream, fetchContainers, startContainer, stopContainer } from '../api';
 
 function ContainersPage() {
   const [containers, setContainers] = useState<ContainerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedContainer, setSelectedContainer] = useState<ContainerSummary | null>(null);
+  const [shellContainer, setShellContainer] = useState<ContainerSummary | null>(null);
 
   const loadData = async () => {
     try {
@@ -34,6 +36,9 @@ function ContainersPage() {
 
   const handleStop = async (container: ContainerSummary) => {
     await stopContainer(container.id);
+    if (shellContainer?.id === container.id) {
+      setShellContainer(null);
+    }
     await loadData();
   };
 
@@ -63,23 +68,29 @@ function ContainersPage() {
       },
       {
         header: 'Actions',
-        accessor: (item) => (
-          <div className="actions">
-            <button className="button" onClick={() => setSelectedContainer(item)}>
-              View logs
-            </button>
-            {item.status.toLowerCase().includes('up') ? (
-              <button className="button" onClick={() => handleStop(item)}>
-                Stop
+        accessor: (item) => {
+          const isRunning = item.status.toLowerCase().includes('up');
+          return (
+            <div className="actions">
+              <button className="button" onClick={() => setSelectedContainer(item)}>
+                View logs
               </button>
-            ) : (
-              <button className="button primary" onClick={() => handleStart(item)}>
-                Start
+              <button className="button" onClick={() => setShellContainer(item)} disabled={!isRunning}>
+                Open shell
               </button>
-            )}
-          </div>
-        ),
-        width: '220px',
+              {isRunning ? (
+                <button className="button" onClick={() => handleStop(item)}>
+                  Stop
+                </button>
+              ) : (
+                <button className="button primary" onClick={() => handleStart(item)}>
+                  Start
+                </button>
+              )}
+            </div>
+          );
+        },
+        width: '280px',
       },
     ],
     []
@@ -101,6 +112,14 @@ function ContainersPage() {
           title={`Live logs — ${selectedContainer.name}`}
           streamFactory={() => containerLogStream(selectedContainer.id)}
           onClose={() => setSelectedContainer(null)}
+        />
+      ) : null}
+
+      {shellContainer ? (
+        <ShellTerminal
+          title={`Shell — ${shellContainer.name}`}
+          streamFactory={() => containerShellStream(shellContainer.id)}
+          onClose={() => setShellContainer(null)}
         />
       ) : null}
     </div>

@@ -164,6 +164,11 @@ a {
   border-color: #b91c1c;
 }
 
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .button:hover {
   background: #e2e8f0;
 }
@@ -185,6 +190,17 @@ a {
   white-space: pre-wrap;
   max-height: 400px;
   overflow: auto;
+}
+
+.terminal-wrapper {
+  background: #0f172a;
+  border-radius: 12px;
+  border: 1px solid #1e293b;
+  padding: 12px;
+}
+
+.terminal-container {
+  height: 360px;
 }
 
 .log-header {

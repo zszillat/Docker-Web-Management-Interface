@@ -56,6 +56,18 @@ class DockerService:
         container = self.client.containers.get(container_id)
         return container.logs(stream=True, follow=True, tail=tail)
 
+    def start_shell(self, container_id: str, command: Optional[List[str]] | None = None):
+        """Create an interactive exec session for a container."""
+
+        container = self.client.containers.get(container_id)
+        exec_id = self.low_level.exec_create(
+            container.id,
+            cmd=command or ["/bin/sh"],
+            tty=True,
+            stdin=True,
+        )
+        return self.low_level.exec_start(exec_id, tty=True, stream=False, socket=True)
+
     # Volumes
     def list_volumes(self) -> List[Dict]:
         volumes = self.client.volumes.list()
