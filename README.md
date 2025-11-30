@@ -147,6 +147,43 @@ services:
       - /mnt/storage/yaml:/mnt/storage/yaml
 ```
 
+## Docker image
+
+Build and publish a combined API + frontend image to your registry:
+
+```bash
+# Build the multi-stage image that compiles the Vite frontend and packages the FastAPI backend
+docker build -t zszillat/docker-web:latest .
+
+# Push to Docker Hub (assuming you are logged in as zszillat)
+docker push zszillat/docker-web:latest
+```
+
+## Docker Compose usage
+
+The container expects access to the host Docker socket and the stack root directory used by your compose projects. The configuration file can be persisted on a small data volume so UI settings survive restarts.
+
+```yaml
+services:
+  docker-web:
+    image: zszillat/docker-web:latest
+    container_name: docker-web
+    ports:
+      - "8000:8000"   # API and bundled UI
+    environment:
+      STACK_ROOT: /mnt/storage/yaml      # Where your compose projects live on the host
+      APP_CONFIG: /data/config.json      # Persisted UI/config settings
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # Required for Docker Engine access
+      - /mnt/storage/yaml:/mnt/storage/yaml         # Compose stacks on the host
+      - docker-web-config:/data                     # Persisted configuration and tokens
+
+volumes:
+  docker-web-config:
+```
+
+Access the UI at `http://localhost:8000/` and authenticate using the initial admin prompt. Adjust the exposed port or bind mounts as needed for your environment.
+
 ------------------------------------------------------------------------
 
 ## Development Timeline
