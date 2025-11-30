@@ -2,23 +2,30 @@ import logging
 from contextlib import suppress
 from typing import Annotated
 
-from docker import errors
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
-from fastapi.websockets import WebSocketState
 import anyio
 from anyio import from_thread
 from anyio.abc import CancelScope
+from docker import errors
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import JSONResponse
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.websockets import WebSocketState
 from pydantic import BaseModel
 
-from .docker_service import DockerService, get_docker_service, translate_docker_error
+from .auth import AuthManager
+from .config_manager import ConfigManager
+from .docker_service import DockerService, translate_docker_error
+from .rate_limit import RateLimiter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Docker Web Management API", version="0.1.0")
 
-DockerDependency = Annotated[DockerService, Depends(get_docker_service)]
+security = HTTPBearer(auto_error=False)
+_auth_manager = AuthManager()
+_config_manager = ConfigManager()
+_rate_limiter = RateLimiter(limit=5, window_seconds=60)
 
 
 class StackCreateRequest(BaseModel):
@@ -40,13 +47,117 @@ class CleanupRequest(BaseModel):
     images: bool = False
 
 
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+
+
+class ConfigUpdateRequest(BaseModel):
+    stack_root: str | None = None
+    frontend_port: int | None = None
+    theme: str | None = None
+
+
+def get_auth_manager() -> AuthManager:
+    return _auth_manager
+
+
+def get_config_manager() -> ConfigManager:
+    return _config_manager
+
+
+def get_rate_limiter() -> RateLimiter:
+    return _rate_limiter
+
+
+def get_docker_service(config: Annotated[ConfigManager, Depends(get_config_manager)]) -> DockerService:
+    return DockerService(stack_root=config.get_config().get("stack_root"))
+
+
+DockerDependency = Annotated[DockerService, Depends(get_docker_service)]
+AuthDependency = Annotated[AuthManager, Depends(get_auth_manager)]
+ConfigDependency = Annotated[ConfigManager, Depends(get_config_manager)]
+RateLimiterDependency = Annotated[RateLimiter, Depends(get_rate_limiter)]
+
+
+def _http_error_from_docker(exc: Exception) -> HTTPException:
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=str(exc))
+    exc = translate_docker_error(exc)
+    if isinstance(exc, errors.NotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, errors.APIError):
+        return HTTPException(status_code=500, detail=str(exc))
+    return HTTPException(status_code=500, detail="Unexpected Docker error")
+
+
+def require_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    auth_manager: AuthDependency = Depends(get_auth_manager),
+) -> str:
+    token = credentials.credentials if credentials else None
+    username = auth_manager.verify_token(token)
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return username
+
+
+UserDependency = Annotated[str, Depends(require_user)]
+
+
 @app.get("/health")
 def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+@app.get("/auth/status")
+def auth_status(auth_manager: AuthDependency):
+    return {"setup_required": not auth_manager.is_setup()}
+
+
+@app.post("/auth/register")
+def register(payload: AuthRequest, auth_manager: AuthDependency):
+    try:
+        auth_manager.register(payload.username, payload.password)
+        token = auth_manager.authenticate(payload.username, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"username": payload.username, "token": token}
+
+
+@app.post("/auth/login")
+def login(payload: AuthRequest, auth_manager: AuthDependency):
+    try:
+        token = auth_manager.authenticate(payload.username, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    return {"username": payload.username, "token": token}
+
+
+@app.get("/auth/me")
+def current_user(username: UserDependency):
+    return {"username": username}
+
+
+@app.get("/config")
+def read_config(config: ConfigDependency, username: UserDependency):
+    return config.get_config()
+
+
+@app.put("/config")
+def update_config(payload: ConfigUpdateRequest, config: ConfigDependency, username: UserDependency):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if not updates:
+        return config.get_config()
+    if "theme" in updates and updates["theme"] not in {"light", "dark"}:
+        raise HTTPException(status_code=400, detail="Theme must be 'light' or 'dark'")
+    if "stack_root" in updates and not updates["stack_root"]:
+        raise HTTPException(status_code=400, detail="Stack root cannot be empty")
+    return config.save(updates)
+
+
 @app.get("/containers")
-def list_containers(docker_service: DockerDependency):
+def list_containers(docker_service: DockerDependency, username: UserDependency):
     try:
         return {"containers": docker_service.list_containers()}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -54,7 +165,13 @@ def list_containers(docker_service: DockerDependency):
 
 
 @app.post("/containers/{container_id}/start")
-def start_container(container_id: str, docker_service: DockerDependency):
+def start_container(
+    container_id: str,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+):
+    limiter.check("container_start", username)
     try:
         docker_service.start_container(container_id)
         return {"status": "started", "id": container_id}
@@ -63,7 +180,14 @@ def start_container(container_id: str, docker_service: DockerDependency):
 
 
 @app.post("/containers/{container_id}/stop")
-def stop_container(container_id: str, docker_service: DockerDependency, timeout: int | None = None):
+def stop_container(
+    container_id: str,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+    timeout: int | None = None,
+):
+    limiter.check("container_stop", username)
     try:
         docker_service.stop_container(container_id, timeout=timeout)
         return {"status": "stopped", "id": container_id}
@@ -72,7 +196,13 @@ def stop_container(container_id: str, docker_service: DockerDependency, timeout:
 
 
 @app.websocket("/ws/containers/{container_id}/logs")
-async def container_logs(container_id: str, websocket: WebSocket, docker_service: DockerDependency):
+async def container_logs(
+    container_id: str,
+    websocket: WebSocket,
+    docker_service: DockerDependency,
+    auth_manager: AuthDependency,
+):
+    await _authorize_websocket(websocket, auth_manager)
     await websocket.accept()
     try:
         log_stream = docker_service.stream_logs(container_id)
@@ -86,7 +216,13 @@ async def container_logs(container_id: str, websocket: WebSocket, docker_service
 
 
 @app.websocket("/ws/containers/{container_id}/shell")
-async def container_shell(container_id: str, websocket: WebSocket, docker_service: DockerDependency):
+async def container_shell(
+    container_id: str,
+    websocket: WebSocket,
+    docker_service: DockerDependency,
+    auth_manager: AuthDependency,
+):
+    await _authorize_websocket(websocket, auth_manager)
     await websocket.accept()
     try:
         shell_socket = docker_service.start_shell(container_id)
@@ -99,7 +235,7 @@ async def container_shell(container_id: str, websocket: WebSocket, docker_servic
 
 
 @app.get("/volumes")
-def list_volumes(docker_service: DockerDependency):
+def list_volumes(docker_service: DockerDependency, username: UserDependency):
     try:
         return {"volumes": docker_service.list_volumes()}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -107,7 +243,14 @@ def list_volumes(docker_service: DockerDependency):
 
 
 @app.delete("/volumes/{name}")
-def delete_volume(name: str, docker_service: DockerDependency, force: bool = False):
+def delete_volume(
+    name: str,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+    force: bool = False,
+):
+    limiter.check("volume_delete", username)
     try:
         docker_service.delete_volume(name, force=force)
         return {"status": "deleted", "name": name}
@@ -116,7 +259,7 @@ def delete_volume(name: str, docker_service: DockerDependency, force: bool = Fal
 
 
 @app.get("/networks")
-def list_networks(docker_service: DockerDependency):
+def list_networks(docker_service: DockerDependency, username: UserDependency):
     try:
         return {"networks": docker_service.list_networks()}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -124,7 +267,13 @@ def list_networks(docker_service: DockerDependency):
 
 
 @app.delete("/networks/{network_id}")
-def delete_network(network_id: str, docker_service: DockerDependency):
+def delete_network(
+    network_id: str,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+):
+    limiter.check("network_delete", username)
     try:
         docker_service.delete_network(network_id)
         return {"status": "deleted", "id": network_id}
@@ -133,7 +282,7 @@ def delete_network(network_id: str, docker_service: DockerDependency):
 
 
 @app.get("/images")
-def list_images(docker_service: DockerDependency):
+def list_images(docker_service: DockerDependency, username: UserDependency):
     try:
         return {"images": docker_service.list_images()}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -141,7 +290,15 @@ def list_images(docker_service: DockerDependency):
 
 
 @app.delete("/images/{image_id}")
-def delete_image(image_id: str, docker_service: DockerDependency, force: bool = False, noprune: bool = False):
+def delete_image(
+    image_id: str,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+    force: bool = False,
+    noprune: bool = False,
+):
+    limiter.check("image_delete", username)
     try:
         docker_service.delete_image(image_id, force=force, noprune=noprune)
         return {"status": "deleted", "id": image_id}
@@ -150,7 +307,7 @@ def delete_image(image_id: str, docker_service: DockerDependency, force: bool = 
 
 
 @app.get("/system/df")
-def system_df(docker_service: DockerDependency):
+def system_df(docker_service: DockerDependency, username: UserDependency):
     try:
         return {"summary": docker_service.system_df_summary()}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -158,7 +315,13 @@ def system_df(docker_service: DockerDependency):
 
 
 @app.post("/cleanup")
-def cleanup_resources(payload: CleanupRequest, docker_service: DockerDependency):
+def cleanup_resources(
+    payload: CleanupRequest,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+):
+    limiter.check("cleanup", username)
     try:
         before = docker_service.system_df_summary()
         results = docker_service.prune_resources(
@@ -180,7 +343,7 @@ def cleanup_resources(payload: CleanupRequest, docker_service: DockerDependency)
 
 
 @app.get("/stacks")
-def discover_stacks(docker_service: DockerDependency):
+def discover_stacks(docker_service: DockerDependency, username: UserDependency, config: ConfigDependency):
     try:
         return {"root": str(docker_service.stack_root), "stacks": docker_service.discover_stacks()}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -188,7 +351,13 @@ def discover_stacks(docker_service: DockerDependency):
 
 
 @app.post("/stacks")
-def create_stack(payload: StackCreateRequest, docker_service: DockerDependency):
+def create_stack(
+    payload: StackCreateRequest,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+):
+    limiter.check("stack_create", username)
     try:
         stack = docker_service.create_stack(
             payload.name,
@@ -202,7 +371,7 @@ def create_stack(payload: StackCreateRequest, docker_service: DockerDependency):
 
 
 @app.get("/compose/ls")
-def compose_ls(docker_service: DockerDependency):
+def compose_ls(docker_service: DockerDependency, username: UserDependency):
     try:
         return {"projects": docker_service.compose_ls()}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -210,7 +379,7 @@ def compose_ls(docker_service: DockerDependency):
 
 
 @app.get("/stacks/{stack_name}/ps")
-def compose_ps(stack_name: str, docker_service: DockerDependency):
+def compose_ps(stack_name: str, docker_service: DockerDependency, username: UserDependency):
     try:
         return {"stack": stack_name, "containers": docker_service.compose_ps(stack_name)}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -218,7 +387,13 @@ def compose_ps(stack_name: str, docker_service: DockerDependency):
 
 
 @app.post("/stacks/{stack_name}/up")
-def compose_up(stack_name: str, docker_service: DockerDependency):
+def compose_up(
+    stack_name: str,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+):
+    limiter.check("compose_up", username)
     try:
         output = docker_service.compose_up(stack_name)
         return {"stack": stack_name, "status": "running", "output": output}
@@ -227,7 +402,13 @@ def compose_up(stack_name: str, docker_service: DockerDependency):
 
 
 @app.post("/stacks/{stack_name}/down")
-def compose_down(stack_name: str, docker_service: DockerDependency):
+def compose_down(
+    stack_name: str,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+):
+    limiter.check("compose_down", username)
     try:
         output = docker_service.compose_down(stack_name)
         return {"stack": stack_name, "status": "stopped", "output": output}
@@ -236,7 +417,16 @@ def compose_down(stack_name: str, docker_service: DockerDependency):
 
 
 @app.websocket("/ws/stacks/{stack_name}/deploy")
-async def compose_deploy(stack_name: str, websocket: WebSocket, docker_service: DockerDependency, action: str = "up"):
+async def compose_deploy(
+    stack_name: str,
+    websocket: WebSocket,
+    docker_service: DockerDependency,
+    auth_manager: AuthDependency,
+    limiter: RateLimiterDependency,
+    action: str = "up",
+):
+    username = await _authorize_websocket(websocket, auth_manager)
+    limiter.check(f"compose_{action}", username)
     await websocket.accept()
     try:
         stream = (
@@ -253,7 +443,7 @@ async def compose_deploy(stack_name: str, websocket: WebSocket, docker_service: 
 
 
 @app.get("/stacks/{stack_name}/files")
-def read_stack_files(stack_name: str, docker_service: DockerDependency):
+def read_stack_files(stack_name: str, docker_service: DockerDependency, username: UserDependency):
     try:
         return {"stack": stack_name, **docker_service.read_stack_files(stack_name)}
     except Exception as exc:  # pragma: no cover - depends on host Docker
@@ -261,7 +451,14 @@ def read_stack_files(stack_name: str, docker_service: DockerDependency):
 
 
 @app.put("/stacks/{stack_name}")
-def update_stack(stack_name: str, payload: StackUpdateRequest, docker_service: DockerDependency):
+def update_stack(
+    stack_name: str,
+    payload: StackUpdateRequest,
+    docker_service: DockerDependency,
+    limiter: RateLimiterDependency,
+    username: UserDependency,
+):
+    limiter.check("stack_update", username)
     try:
         details = docker_service.update_stack_files(
             stack_name,
@@ -271,6 +468,19 @@ def update_stack(stack_name: str, payload: StackUpdateRequest, docker_service: D
         return {"stack": stack_name, **details}
     except Exception as exc:  # pragma: no cover - depends on host Docker
         raise _http_error_from_docker(exc)
+
+
+async def _authorize_websocket(websocket: WebSocket, auth_manager: AuthManager) -> str:
+    auth_header = websocket.headers.get("Authorization") or ""
+    token = None
+    if auth_header.lower().startswith("bearer "):
+        token = auth_header.split(" ", 1)[1].strip()
+    token = token or websocket.query_params.get("token")
+    username = auth_manager.verify_token(token)
+    if not username:
+        await websocket.close(code=4401)
+        raise WebSocketDisconnect()
+    return username
 
 
 async def _forward_logs(websocket: WebSocket, log_stream):
@@ -291,17 +501,6 @@ async def _send_error(websocket: WebSocket, exc: Exception):
         await websocket.send_json({"error": str(exc)})
     except Exception:  # pragma: no cover - defensive
         logger.exception("Failed to send websocket error")
-
-
-def _http_error_from_docker(exc: Exception) -> HTTPException:
-    if isinstance(exc, ValueError):
-        return HTTPException(status_code=400, detail=str(exc))
-    exc = translate_docker_error(exc)
-    if isinstance(exc, errors.NotFound):
-        return HTTPException(status_code=404, detail=str(exc))
-    if isinstance(exc, errors.APIError):
-        return HTTPException(status_code=500, detail=str(exc))
-    return HTTPException(status_code=500, detail="Unexpected Docker error")
 
 
 async def _stream_command_output(websocket: WebSocket, stream):
