@@ -70,3 +70,9 @@ export interface CleanupResponse {
   after: SystemDfSummary;
   reclaimed_bytes: number;
 }
+
+export interface AppConfig {
+  stack_root: string;
+  frontend_port: number;
+  theme: 'light' | 'dark';
+}

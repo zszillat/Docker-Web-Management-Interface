@@ -1,18 +1,36 @@
-import { NavLink } from 'react-router-dom';
-import { ReactNode } from 'react';
+import { NavLink, useNavigate, Outlet } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
+import { useConfig } from '../context/ConfigContext';
 
-interface Props {
-  children: ReactNode;
-}
+function Layout() {
+  const { user, logout } = useAuth();
+  const { config } = useConfig();
+  const navigate = useNavigate();
+  const navLinkClasses = ({ isActive }: { isActive: boolean }) => `nav-link${isActive ? ' active' : ''}`;
 
-function Layout({ children }: Props) {
-  const navLinkClasses = ({ isActive }: { isActive: boolean }) =>
-    `nav-link${isActive ? ' active' : ''}`;
+  const handleLogout = () => {
+    logout();
+    navigate('/login', { replace: true });
+  };
 
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <h1>Docker Web Manager</h1>
+        <div className="sidebar-header">
+          <div>
+            <h1>Docker Web Manager</h1>
+            <span className="inline-hint">Stage 7 — Polishing &amp; Security</span>
+          </div>
+          <div className="user-chip">
+            <div>
+              <div className="user-name">{user}</div>
+              <span className="inline-hint">Theme: {config?.theme ?? 'light'}</span>
+            </div>
+            <button className="button" onClick={handleLogout} type="button">
+              Logout
+            </button>
+          </div>
+        </div>
         <div className="nav-section">
           <NavLink to="/compose" className={navLinkClasses}>
             Compose
@@ -32,10 +50,14 @@ function Layout({ children }: Props) {
           <NavLink to="/cleanup" className={navLinkClasses}>
             Cleanup
           </NavLink>
+          <NavLink to="/config" className={navLinkClasses}>
+            Config
+          </NavLink>
         </div>
-        <span className="inline-hint">Stage 6 — System cleanup & stats</span>
       </aside>
-      <main className="content-area">{children}</main>
+      <main className="content-area">
+        <Outlet />
+      </main>
     </div>
   );
 }

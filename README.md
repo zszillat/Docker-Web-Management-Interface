@@ -216,6 +216,18 @@ The `frontend/` directory now contains a Vite + React implementation of this bas
 -   Add configuration page for stack root, frontend port, theme, etc.
 -   Write documentation & finalize UI/UX polish
 
+#### Stage 7 usage notes
+
+-   The first person to reach `/login` will be prompted to create the
+    administrator account. Subsequent visits require that login.
+-   All API routes are now authenticated. Attach
+    `Authorization: Bearer <token>` to REST calls and `token` query
+    parameter to WebSocket connections.
+-   Sensitive actions (compose up/down, deletes, cleanup, etc.) are rate
+    limited to 5 requests per minute per user.
+-   The **Config** screen in the UI allows adjusting stack root,
+    frontend port hint, and the light/dark theme.
+
 ------------------------------------------------------------------------
 
 ## License
