@@ -25,7 +25,8 @@ Docker socket and the real directory structure on disk.
 
 ### Compose Management
 
--   List all compose stacks by scanning a defined root directory.
+-   List all compose stacks by scanning a defined root directory (uses a
+    sensible default but can be overridden in a config file).
 
 -   Inspect stack containers using:
 
@@ -38,15 +39,20 @@ Docker socket and the real directory structure on disk.
 
 -   Real-time logs and shell access for each container.
 
+-   All destructive stack actions (e.g., stop/down/delete) require a
+    confirmation prompt before execution.
+
 -   Create new stacks by choosing:
 
     -   Stack directory (e.g. `/mnt/storage/yaml`)
     -   Stack name
-    -   Compose file content\
+    -   Compose file content
+    -   Environment variables to write into an adjacent `.env`
 
 -   Automatically writes:
 
         /mnt/storage/yaml/<stackName>/docker-compose.yaml
+        /mnt/storage/yaml/<stackName>/.env
 
     and runs `docker compose up -d` with streamed terminal output.
 
@@ -56,24 +62,29 @@ Docker socket and the real directory structure on disk.
 -   Start, stop, delete containers.
 -   Live logs via WebSocket.
 -   Shell access into any container using `docker exec`.
+-   Every destructive action (delete/stop) surfaces a confirmation
+    prompt before execution.
 
 ### Volumes
 
 -   List volumes.
 -   Delete individual volumes.
 -   Cleanup unused volumes via `docker volume prune`.
+-   All deletions and prunes require explicit confirmation prompts.
 
 ### Networks
 
 -   List networks.
 -   Delete unused networks.
 -   Cleanup dangling networks via `docker network prune`.
+-   All deletions and prunes require explicit confirmation prompts.
 
 ### Images
 
 -   List images.
 -   Delete images.
 -   Cleanup unused images via `docker image prune`.
+-   All deletions and prunes require explicit confirmation prompts.
 
 ### System Cleanup
 
@@ -81,7 +92,8 @@ A cleanup dialog with checkboxes for: - Containers (unchecked by
 default) - Volumes - Networks - Images
 
 Shows space reclaimed using: - `docker system df` before/after
-operations
+operations. All cleanup actions surface a confirmation dialog prior to
+execution.
 
 ------------------------------------------------------------------------
 
@@ -89,7 +101,7 @@ operations
 
 ### Backend
 
--   Language: developer's choice (Go / Node.js / Python recommended)
+-   Language: Python (preferred for the initial implementation)
 -   Interfaces:
     -   Docker Engine API (`/var/run/docker.sock`)
     -   Subprocess execution of `docker` and `docker compose`
@@ -103,6 +115,8 @@ operations
     -   Container/volume/network/image CRUD
     -   Cleanup operations
     -   Validation and file operations for stack directories
+    -   Reading runtime configuration (e.g., stack root, frontend port)
+        from a config file
 
 ### Frontend
 
@@ -111,20 +125,23 @@ operations
     -   Left sidebar navigation: Compose, Containers, Volumes, Networks,
         Images
     -   Data tables for each resource type
-    -   YAML editor for new stack creation
+    -   YAML editor for new stack creation (captures environment
+        variables into a generated `.env` adjacent to each
+        `docker-compose.yaml`)
     -   Embedded terminal via xterm.js
     -   Real-time logs via WebSocket
+    -   Frontend served on port `18675` by default
 
 ### Deployment
 
-Recommended Docker Compose deployment:
+Recommended Docker Compose deployment (frontend exposed on port 18675):
 
 ``` yaml
 services:
   webui:
     image: your/name
     ports:
-      - "8080:8080"
+      - "18675:18675"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /mnt/storage/yaml:/mnt/storage/yaml
@@ -190,9 +207,11 @@ services:
 
 ### Stage 7 --- Polishing & Security
 
--   Add authentication layer
+-   Add authentication layer with a simple username/password flow: the
+    first login prompts creation of a single administrator account
+    (single-user for now, multi-user later)
 -   Rate limit dangerous actions
--   Add configuration page for stack root, theme, etc.
+-   Add configuration page for stack root, frontend port, theme, etc.
 -   Write documentation & finalize UI/UX polish
 
 ------------------------------------------------------------------------
