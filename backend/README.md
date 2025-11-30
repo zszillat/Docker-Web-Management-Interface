@@ -34,4 +34,13 @@ FastAPI application that exposes Docker management endpoints for the web interfa
 - `GET /images` — list images.
 - `DELETE /images/{image_id}` — delete an image (supports `force`/`noprune`).
 
-These endpoints form the foundations for Stage 1 of the project timeline.
+## Compose stack endpoints (Stage 2)
+
+- `GET /stacks` — discover compose projects under the configured stack root (defaults to `/mnt/storage/yaml` or `STACK_ROOT`).
+- `GET /compose/ls` — run `docker compose ls` for a global view of compose projects.
+- `GET /stacks/{stack_name}/ps` — list services for a specific stack via `docker compose ps`.
+- `POST /stacks/{stack_name}/up` — run `docker compose up -d` for the stack.
+- `POST /stacks/{stack_name}/down` — stop the stack with `docker compose down`.
+- `WS /ws/stacks/{stack_name}/deploy` — stream compose `up`/`down` output in real time (set `action=down` query param to stream `down`).
+
+These endpoints form the foundations for Stages 1 and 2 of the project timeline.

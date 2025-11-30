@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconn
 from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
 import anyio
+from anyio import from_thread
 
 from .docker_service import DockerService, get_docker_service, translate_docker_error
 
@@ -113,6 +114,65 @@ def delete_image(image_id: str, docker_service: DockerDependency, force: bool = 
         raise _http_error_from_docker(exc)
 
 
+@app.get("/stacks")
+def discover_stacks(docker_service: DockerDependency):
+    try:
+        return {"root": str(docker_service.stack_root), "stacks": docker_service.discover_stacks()}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.get("/compose/ls")
+def compose_ls(docker_service: DockerDependency):
+    try:
+        return {"projects": docker_service.compose_ls()}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.get("/stacks/{stack_name}/ps")
+def compose_ps(stack_name: str, docker_service: DockerDependency):
+    try:
+        return {"stack": stack_name, "containers": docker_service.compose_ps(stack_name)}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.post("/stacks/{stack_name}/up")
+def compose_up(stack_name: str, docker_service: DockerDependency):
+    try:
+        output = docker_service.compose_up(stack_name)
+        return {"stack": stack_name, "status": "running", "output": output}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.post("/stacks/{stack_name}/down")
+def compose_down(stack_name: str, docker_service: DockerDependency):
+    try:
+        output = docker_service.compose_down(stack_name)
+        return {"stack": stack_name, "status": "stopped", "output": output}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.websocket("/ws/stacks/{stack_name}/deploy")
+async def compose_deploy(stack_name: str, websocket: WebSocket, docker_service: DockerDependency, action: str = "up"):
+    await websocket.accept()
+    try:
+        stream = (
+            docker_service.compose_down_stream(stack_name)
+            if action == "down"
+            else docker_service.compose_up_stream(stack_name)
+        )
+        await _stream_command_output(websocket, stream)
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected for stack %s", stack_name)
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        await _send_error(websocket, exc)
+        await websocket.close()
+
+
 async def _forward_logs(websocket: WebSocket, log_stream):
     async def _send_lines():
         try:
@@ -140,3 +200,18 @@ def _http_error_from_docker(exc: Exception) -> HTTPException:
     if isinstance(exc, errors.APIError):
         return HTTPException(status_code=500, detail=str(exc))
     return HTTPException(status_code=500, detail="Unexpected Docker error")
+
+
+async def _stream_command_output(websocket: WebSocket, stream):
+    def _run_stream():
+        with from_thread.start_blocking_portal() as portal:
+            try:
+                for line in stream:
+                    if websocket.application_state != WebSocketState.CONNECTED:
+                        break
+                    portal.call(websocket.send_text, line)
+            finally:
+                if websocket.application_state == WebSocketState.CONNECTED:
+                    portal.call(websocket.close)
+
+    await anyio.to_thread.run_sync(_run_stream)
