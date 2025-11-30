@@ -45,6 +45,10 @@ export function containerLogStream(id: string) {
   return new WebSocket(websocketUrl(`/ws/containers/${id}/logs`));
 }
 
+export function containerShellStream(id: string) {
+  return new WebSocket(websocketUrl(`/ws/containers/${id}/shell`));
+}
+
 export async function fetchVolumes(): Promise<VolumeSummary[]> {
   const res = await fetch(url('/volumes'));
   if (!res.ok) throw new Error('Failed to load volumes');

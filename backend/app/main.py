@@ -1,4 +1,5 @@
 import logging
+from contextlib import suppress
 from typing import Annotated
 
 from docker import errors
@@ -7,6 +8,7 @@ from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
 import anyio
 from anyio import from_thread
+from anyio.abc import CancelScope
 from pydantic import BaseModel
 
 from .docker_service import DockerService, get_docker_service, translate_docker_error
@@ -71,6 +73,19 @@ async def container_logs(container_id: str, websocket: WebSocket, docker_service
             await tg.start(_forward_logs, websocket, log_stream)
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected for container %s", container_id)
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        await _send_error(websocket, exc)
+        await websocket.close()
+
+
+@app.websocket("/ws/containers/{container_id}/shell")
+async def container_shell(container_id: str, websocket: WebSocket, docker_service: DockerDependency):
+    await websocket.accept()
+    try:
+        shell_socket = docker_service.start_shell(container_id)
+        await _bridge_shell(websocket, shell_socket)
+    except WebSocketDisconnect:
+        logger.info("WebSocket disconnected for container shell %s", container_id)
     except Exception as exc:  # pragma: no cover - depends on host Docker
         await _send_error(websocket, exc)
         await websocket.close()
@@ -265,3 +280,40 @@ async def _stream_command_output(websocket: WebSocket, stream):
                     portal.call(websocket.close)
 
     await anyio.to_thread.run_sync(_run_stream)
+
+
+async def _bridge_shell(websocket: WebSocket, shell_socket):
+    async with anyio.create_task_group() as tg:
+        tg.start_soon(_forward_shell_output, websocket, shell_socket, tg.cancel_scope)
+        tg.start_soon(_forward_shell_input, websocket, shell_socket, tg.cancel_scope)
+
+
+async def _forward_shell_output(websocket: WebSocket, shell_socket, cancel_scope: CancelScope):
+    try:
+        while True:
+            data = await anyio.to_thread.run_sync(shell_socket.recv, 4096)
+            if not data:
+                break
+            await websocket.send_text(data.decode("utf-8", errors="ignore"))
+    except Exception:  # pragma: no cover - depends on host Docker
+        logger.exception("Error streaming shell output")
+    finally:
+        cancel_scope.cancel()
+        if websocket.application_state == WebSocketState.CONNECTED:
+            with suppress(Exception):
+                await websocket.close()
+
+
+async def _forward_shell_input(websocket: WebSocket, shell_socket, cancel_scope: CancelScope):
+    try:
+        while True:
+            message = await websocket.receive_text()
+            await anyio.to_thread.run_sync(shell_socket.send, message.encode())
+    except WebSocketDisconnect:
+        logger.info("Shell websocket disconnected")
+    except Exception:  # pragma: no cover - depends on host Docker
+        logger.exception("Error forwarding shell input")
+    finally:
+        cancel_scope.cancel()
+        with suppress(Exception):
+            shell_socket.close()
