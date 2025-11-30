@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from fastapi.websockets import WebSocketState
 import anyio
 from anyio import from_thread
+from pydantic import BaseModel
 
 from .docker_service import DockerService, get_docker_service, translate_docker_error
 
@@ -16,6 +17,18 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Docker Web Management API", version="0.1.0")
 
 DockerDependency = Annotated[DockerService, Depends(get_docker_service)]
+
+
+class StackCreateRequest(BaseModel):
+    name: str
+    compose_content: str
+    env_content: str | None = None
+    overwrite: bool = False
+
+
+class StackUpdateRequest(BaseModel):
+    compose_content: str
+    env_content: str | None = None
 
 
 @app.get("/health")
@@ -122,6 +135,20 @@ def discover_stacks(docker_service: DockerDependency):
         raise _http_error_from_docker(exc)
 
 
+@app.post("/stacks")
+def create_stack(payload: StackCreateRequest, docker_service: DockerDependency):
+    try:
+        stack = docker_service.create_stack(
+            payload.name,
+            compose_content=payload.compose_content,
+            env_content=payload.env_content,
+            overwrite=payload.overwrite,
+        )
+        return {"stack": stack}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
 @app.get("/compose/ls")
 def compose_ls(docker_service: DockerDependency):
     try:
@@ -173,6 +200,27 @@ async def compose_deploy(stack_name: str, websocket: WebSocket, docker_service: 
         await websocket.close()
 
 
+@app.get("/stacks/{stack_name}/files")
+def read_stack_files(stack_name: str, docker_service: DockerDependency):
+    try:
+        return {"stack": stack_name, **docker_service.read_stack_files(stack_name)}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.put("/stacks/{stack_name}")
+def update_stack(stack_name: str, payload: StackUpdateRequest, docker_service: DockerDependency):
+    try:
+        details = docker_service.update_stack_files(
+            stack_name,
+            compose_content=payload.compose_content,
+            env_content=payload.env_content,
+        )
+        return {"stack": stack_name, **details}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
 async def _forward_logs(websocket: WebSocket, log_stream):
     async def _send_lines():
         try:
@@ -194,6 +242,8 @@ async def _send_error(websocket: WebSocket, exc: Exception):
 
 
 def _http_error_from_docker(exc: Exception) -> HTTPException:
+    if isinstance(exc, ValueError):
+        return HTTPException(status_code=400, detail=str(exc))
     exc = translate_docker_error(exc)
     if isinstance(exc, errors.NotFound):
         return HTTPException(status_code=404, detail=str(exc))

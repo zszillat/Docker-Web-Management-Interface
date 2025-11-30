@@ -30,3 +30,22 @@ export interface ImageSummary {
   labels?: Record<string, string>;
   size?: number;
 }
+
+export interface StackInfo {
+  name: string;
+  path: string;
+  compose_file: string;
+}
+
+export interface ComposeServiceSummary {
+  name: string;
+  service?: string;
+  state?: string;
+  status?: string;
+  ports?: string;
+}
+
+export interface StackFiles {
+  compose_content: string;
+  env_content?: string;
+}

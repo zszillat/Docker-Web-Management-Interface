@@ -1,4 +1,12 @@
-import { ContainerSummary, ImageSummary, NetworkSummary, VolumeSummary } from './types';
+import {
+  ComposeServiceSummary,
+  ContainerSummary,
+  ImageSummary,
+  NetworkSummary,
+  StackFiles,
+  StackInfo,
+  VolumeSummary,
+} from './types';
 
 const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:8000';
 
@@ -71,4 +79,57 @@ export async function fetchImages(): Promise<ImageSummary[]> {
 export async function deleteImage(id: string) {
   const res = await fetch(url(`/images/${id}`), { method: 'DELETE' });
   if (!res.ok) throw new Error('Unable to delete image');
+}
+
+export async function fetchStacks(): Promise<StackInfo[]> {
+  const res = await fetch(url('/stacks'));
+  if (!res.ok) throw new Error('Failed to load stacks');
+  const data = await res.json();
+  return data.stacks ?? [];
+}
+
+export async function fetchStackContainers(stackName: string): Promise<ComposeServiceSummary[]> {
+  const res = await fetch(url(`/stacks/${stackName}/ps`));
+  if (!res.ok) throw new Error('Failed to load stack containers');
+  const data = await res.json();
+  return data.containers ?? [];
+}
+
+export async function bringStackUp(stackName: string) {
+  const res = await fetch(url(`/stacks/${stackName}/up`), { method: 'POST' });
+  if (!res.ok) throw new Error('Unable to start stack');
+}
+
+export async function bringStackDown(stackName: string) {
+  const res = await fetch(url(`/stacks/${stackName}/down`), { method: 'POST' });
+  if (!res.ok) throw new Error('Unable to stop stack');
+}
+
+export function stackDeployStream(stackName: string, action: 'up' | 'down' = 'up') {
+  return new WebSocket(websocketUrl(`/ws/stacks/${stackName}/deploy?action=${action}`));
+}
+
+export async function createStack(payload: { name: string; compose_content: string; env_content?: string }) {
+  const res = await fetch(url('/stacks'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to create stack');
+}
+
+export async function fetchStackFiles(stackName: string): Promise<StackFiles> {
+  const res = await fetch(url(`/stacks/${stackName}/files`));
+  if (!res.ok) throw new Error('Failed to load stack files');
+  const data = await res.json();
+  return { compose_content: data.compose_content, env_content: data.env_content };
+}
+
+export async function updateStack(stackName: string, payload: StackFiles) {
+  const res = await fetch(url(`/stacks/${stackName}`), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Failed to update stack');
 }

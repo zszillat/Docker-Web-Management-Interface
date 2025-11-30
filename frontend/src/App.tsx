@@ -4,12 +4,14 @@ import VolumesPage from './pages/VolumesPage';
 import NetworksPage from './pages/NetworksPage';
 import ImagesPage from './pages/ImagesPage';
 import Layout from './components/Layout';
+import ComposePage from './pages/ComposePage';
 
 function App() {
   return (
     <Layout>
       <Routes>
         <Route path="/containers" element={<ContainersPage />} />
+        <Route path="/compose" element={<ComposePage />} />
         <Route path="/volumes" element={<VolumesPage />} />
         <Route path="/networks" element={<NetworksPage />} />
         <Route path="/images" element={<ImagesPage />} />

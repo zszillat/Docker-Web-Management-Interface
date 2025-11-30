@@ -205,3 +205,43 @@ a {
   text-align: center;
   color: #475569;
 }
+
+.page-grid {
+  display: grid;
+  grid-template-columns: 2fr 1.1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.form-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+input,
+textarea {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  font-family: inherit;
+  font-size: 14px;
+  background: #f8fafc;
+}
+
+textarea {
+  resize: vertical;
+  min-height: 120px;
+}
+
+.table.nested {
+  margin-top: 10px;
+}
