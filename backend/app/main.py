@@ -33,6 +33,13 @@ class StackUpdateRequest(BaseModel):
     env_content: str | None = None
 
 
+class CleanupRequest(BaseModel):
+    containers: bool = False
+    volumes: bool = False
+    networks: bool = False
+    images: bool = False
+
+
 @app.get("/health")
 def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
@@ -138,6 +145,36 @@ def delete_image(image_id: str, docker_service: DockerDependency, force: bool = 
     try:
         docker_service.delete_image(image_id, force=force, noprune=noprune)
         return {"status": "deleted", "id": image_id}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.get("/system/df")
+def system_df(docker_service: DockerDependency):
+    try:
+        return {"summary": docker_service.system_df_summary()}
+    except Exception as exc:  # pragma: no cover - depends on host Docker
+        raise _http_error_from_docker(exc)
+
+
+@app.post("/cleanup")
+def cleanup_resources(payload: CleanupRequest, docker_service: DockerDependency):
+    try:
+        before = docker_service.system_df_summary()
+        results = docker_service.prune_resources(
+            containers=payload.containers,
+            volumes=payload.volumes,
+            networks=payload.networks,
+            images=payload.images,
+        )
+        after = docker_service.system_df_summary()
+        reclaimed = max((before.get("total_size") or 0) - (after.get("total_size") or 0), 0)
+        return {
+            "before": before,
+            "after": after,
+            "reclaimed_bytes": reclaimed,
+            "results": results,
+        }
     except Exception as exc:  # pragma: no cover - depends on host Docker
         raise _http_error_from_docker(exc)
 

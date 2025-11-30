@@ -5,6 +5,9 @@ import {
   NetworkSummary,
   StackFiles,
   StackInfo,
+  CleanupResponse,
+  CleanupSelection,
+  SystemDfSummary,
   VolumeSummary,
 } from './types';
 
@@ -136,4 +139,21 @@ export async function updateStack(stackName: string, payload: StackFiles) {
     body: JSON.stringify(payload),
   });
   if (!res.ok) throw new Error('Failed to update stack');
+}
+
+export async function fetchSystemUsage(): Promise<SystemDfSummary> {
+  const res = await fetch(url('/system/df'));
+  if (!res.ok) throw new Error('Failed to load system usage');
+  const data = await res.json();
+  return data.summary;
+}
+
+export async function runCleanup(payload: CleanupSelection): Promise<CleanupResponse> {
+  const res = await fetch(url('/cleanup'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error('Cleanup failed');
+  return res.json();
 }

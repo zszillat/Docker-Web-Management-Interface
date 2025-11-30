@@ -29,8 +29,11 @@ function Layout({ children }: Props) {
           <NavLink to="/images" className={navLinkClasses}>
             Images
           </NavLink>
+          <NavLink to="/cleanup" className={navLinkClasses}>
+            Cleanup
+          </NavLink>
         </div>
-        <span className="inline-hint">Stage 4 — Compose UI</span>
+        <span className="inline-hint">Stage 6 — System cleanup & stats</span>
       </aside>
       <main className="content-area">{children}</main>
     </div>
