@@ -185,6 +185,8 @@ services:
 -   Build tables and action buttons
 -   Integrate log viewer component
 
+The `frontend/` directory now contains a Vite + React implementation of this base UI. Run `npm install` followed by `npm run dev -- --host --port 5173` to explore the navigation, tables, and live log viewer backed by the FastAPI service.
+
 ### Stage 4 --- Compose UI
 
 -   Compose list page
