@@ -34,17 +34,24 @@ _frontend_port = _config_manager.get_config().get("frontend_port", 8000)
 _cors_origins = {
     f"http://localhost:{_frontend_port}",
     f"http://127.0.0.1:{_frontend_port}",
+    f"http://10.0.0.1:{_frontend_port}",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://10.0.0.1:5173",
     "http://localhost:8000",
     "http://127.0.0.1:8000",
+    "http://10.0.0.1:8000",
     f"https://localhost:{_frontend_port}",
     f"https://127.0.0.1:{_frontend_port}",
+    f"https://10.0.0.1:{_frontend_port}",
     "https://localhost:5173",
     "https://127.0.0.1:5173",
+    "https://10.0.0.1:5173",
     "https://localhost:8000",
     "https://127.0.0.1:8000",
+    "https://10.0.0.1:8000",
 }
+
 
 app.add_middleware(
     CORSMiddleware,
