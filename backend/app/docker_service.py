@@ -17,7 +17,9 @@ class DockerService:
     def __init__(self, stack_root: str | Path | None = None) -> None:
         try:
             self.client = docker.from_env()
-            self.low_level = docker.APIClient.from_env()
+            # The low-level client is exposed via the high-level client's API attribute.
+            # docker.APIClient.from_env() is not available in all SDK versions.
+            self.low_level = self.client.api
             # Validate connection early so we fail fast if the socket is missing.
             self.client.ping()
         except Exception as exc:  # pragma: no cover - connectivity depends on host
