@@ -95,7 +95,7 @@ def _http_error_from_docker(exc: Exception) -> HTTPException:
 
 def require_user(
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
-    auth_manager: AuthDependency = Depends(get_auth_manager),
+    auth_manager: AuthManager = Depends(get_auth_manager),
 ) -> str:
     token = credentials.credentials if credentials else None
     username = auth_manager.verify_token(token)
