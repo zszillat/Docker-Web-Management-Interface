@@ -3,4 +3,9 @@ uvicorn[standard]==0.32.0
 docker==7.1.0
 anyio==4.4.0
 passlib[bcrypt]==1.7.4
+# Passlib 1.7.4 is not compatible with bcrypt 5.x (missing __about__ attribute
+# and stricter length checks), so pin bcrypt to a 4.x release that Passlib
+# supports. Without this pin, hashing any password fails with "password cannot
+# be longer than 72 bytes" even for short inputs like "admin".
+bcrypt==4.1.2
 PyJWT==2.9.0
