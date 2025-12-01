@@ -8,6 +8,7 @@ from anyio import from_thread
 from anyio.abc import CancelScope
 from docker import errors
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from fastapi.websockets import WebSocketState
@@ -28,6 +29,30 @@ security = HTTPBearer(auto_error=False)
 _auth_manager = AuthManager()
 _config_manager = ConfigManager()
 _rate_limiter = RateLimiter(limit=5, window_seconds=60)
+
+_frontend_port = _config_manager.get_config().get("frontend_port", 8000)
+_cors_origins = {
+    f"http://localhost:{_frontend_port}",
+    f"http://127.0.0.1:{_frontend_port}",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    f"https://localhost:{_frontend_port}",
+    f"https://127.0.0.1:{_frontend_port}",
+    "https://localhost:5173",
+    "https://127.0.0.1:5173",
+    "https://localhost:8000",
+    "https://127.0.0.1:8000",
+}
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=sorted(_cors_origins),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 class StackCreateRequest(BaseModel):
