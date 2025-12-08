@@ -16,10 +16,10 @@ React + Vite application for the Docker Web Management Interface (Stage 3).
    npm run dev -- --host --port 5173
    ```
 
-   The API base URL defaults to `http://localhost:8000`. Override with:
+   The API base URL defaults to `http://localhost:8003`. Override with:
 
    ```bash
-   VITE_API_URL=http://your-api:8000 npm run dev
+   VITE_API_URL=http://your-api:8003 npm run dev
    ```
 
 3. Build for production:

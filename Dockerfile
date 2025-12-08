@@ -30,11 +30,11 @@ COPY backend/ ./backend/
 COPY --from=frontend-builder /frontend/dist ./backend/app/static
 
 WORKDIR /app/backend
-EXPOSE 13144
+EXPOSE 8003
 
 ENV STACK_ROOT=/mnt/storage/yaml \
     APP_CONFIG=/app/backend/app/config.json \
     BIND_HOST=0.0.0.0 \
-    BIND_PORT=13144
+    BIND_PORT=8003
 
-CMD ["sh", "-c", "uvicorn app.main:app --host ${BIND_HOST:-0.0.0.0} --port ${BIND_PORT:-13144}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host ${BIND_HOST:-0.0.0.0} --port ${BIND_PORT:-8003}"]
