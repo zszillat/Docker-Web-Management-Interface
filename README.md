@@ -169,7 +169,7 @@ services:
     image: zszillat/docker-web:latest
     container_name: docker-web
     ports:
-      - "13144:13144"   # API and bundled UI
+      - "8003:8003"   # API and bundled UI
     environment:
       STACK_ROOT: /mnt/storage/yaml      # Where your compose projects live on the host
       APP_CONFIG: /data/config.json      # Persisted UI/config settings
@@ -186,12 +186,12 @@ You can override the API bind address and port using environment variables (for 
 
 ```bash
 BIND_HOST=0.0.0.0
-BIND_PORT=13144
+BIND_PORT=8003
 ```
 
-The defaults bind the server to `0.0.0.0:13144`.
+The defaults bind the server to `0.0.0.0:8003`.
 
-Access the UI at `http://localhost:13144/` and authenticate using the initial admin prompt. Adjust the exposed port or bind mounts as needed for your environment.
+Access the UI at `http://localhost:8003/` and authenticate using the initial admin prompt. Adjust the exposed port or bind mounts as needed for your environment.
 
 ------------------------------------------------------------------------
 

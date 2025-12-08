@@ -19,13 +19,15 @@ FastAPI application that exposes Docker management endpoints for the web interfa
    # Edit BIND_HOST and BIND_PORT if you need custom values
    ```
 
-3. Start the API server (defaults to `0.0.0.0:13144`):
+3. Start the API server (defaults to `0.0.0.0:8003`):
 
    ```bash
-   uvicorn app.main:app --reload --host "${BIND_HOST:-0.0.0.0}" --port "${BIND_PORT:-13144}" --env-file .env
+   uvicorn app.main:app --reload --host "${BIND_HOST:-0.0.0.0}" --port "${BIND_PORT:-8003}" --env-file .env
    ```
 
    Ensure the process can reach `/var/run/docker.sock` (for example by running inside Docker with the socket mounted).
+
+   When running directly via Python, `python -m app.main` will also bind to `0.0.0.0:8003` by default, honoring `BIND_HOST`/`BIND_PORT` if set. Running `uvicorn app.main:app` without the flags above will fall back to uvicorn's built-in default of `8000`.
 
 ## Available endpoints
 

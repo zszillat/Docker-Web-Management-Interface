@@ -15,13 +15,13 @@ import {
 const envApiBase = import.meta.env.VITE_API_URL as string | undefined;
 const devFallback =
   typeof window !== 'undefined' && window.location.port === '5173'
-    ? 'http://localhost:8000'
+    ? 'http://localhost:8003'
     : undefined;
 const inferredOrigin =
   typeof window !== 'undefined' && window.location.origin
     ? window.location.origin
     : undefined;
-const API_BASE = envApiBase ?? devFallback ?? inferredOrigin ?? 'http://localhost:8000';
+const API_BASE = envApiBase ?? devFallback ?? inferredOrigin ?? 'http://localhost:8003';
 
 let authToken: string | null = null;
 let unauthorizedHandler: (() => void) | null = null;
