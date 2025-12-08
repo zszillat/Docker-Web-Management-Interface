@@ -12,10 +12,17 @@ FastAPI application that exposes Docker management endpoints for the web interfa
    pip install -r requirements.txt
    ```
 
-2. Start the API server:
+2. (Optional) Create a `.env` file to override the bind host/port used by uvicorn:
 
    ```bash
-   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   cp ../.env.example .env
+   # Edit BIND_HOST and BIND_PORT if you need custom values
+   ```
+
+3. Start the API server (defaults to `0.0.0.0:13144`):
+
+   ```bash
+   uvicorn app.main:app --reload --host "${BIND_HOST:-0.0.0.0}" --port "${BIND_PORT:-13144}" --env-file .env
    ```
 
    Ensure the process can reach `/var/run/docker.sock` (for example by running inside Docker with the socket mounted).
