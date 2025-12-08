@@ -27,6 +27,8 @@ FastAPI application that exposes Docker management endpoints for the web interfa
 
    Ensure the process can reach `/var/run/docker.sock` (for example by running inside Docker with the socket mounted).
 
+   When running directly via Python, `python -m app.main` will also bind to `0.0.0.0:8003` by default, honoring `BIND_HOST`/`BIND_PORT` if set. Running `uvicorn app.main:app` without the flags above will fall back to uvicorn's built-in default of `8000`.
+
 ## Available endpoints
 
 - `GET /health` — basic readiness check.

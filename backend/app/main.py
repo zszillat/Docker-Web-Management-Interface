@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import suppress
 from pathlib import Path
 from typing import Annotated
@@ -592,3 +593,11 @@ async def _forward_shell_input(websocket: WebSocket, shell_socket, cancel_scope:
 frontend_dir = Path(__file__).resolve().parent / "static"
 if frontend_dir.exists():
     app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    bind_host = os.getenv("BIND_HOST", "0.0.0.0")
+    bind_port = int(os.getenv("BIND_PORT", "8003"))
+    uvicorn.run("app.main:app", host=bind_host, port=bind_port, reload=True)
